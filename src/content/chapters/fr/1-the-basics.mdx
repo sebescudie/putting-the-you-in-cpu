@@ -54,75 +54,75 @@ Il se trouve que les CPU ont une vue super basique de leur environnement; ils ne
 
 Pour moi, ça pose plus de questions que ça n'en résous :
 
-1. Si le CPU ne connait pas le concept de multiprocess et se contente d’exécuter des instruction de façon séquentielle, comment il fait pour ne pas rester coincé dans un programme ? Comment plusieurs programmes peuvent s’exécuter en même temps ?
-2. Si les programmes s’exécutent directement sur le CPU, et si le CPU peut directement accéder à la RAM, pourquoi du code ne peut pas accéder à la zone mémoire d’un autre programme, ou dieu nous en garde, au kernel?
-3. Et au fait, c’est quoi le mécanisme qui empêche les process d’exécuter n’importe-quoi et de faire ce qu’ils veulent à votre ordinateur? ET C’EST QUOI UN PUTAIN DE SYSCALL?
+1. Si le CPU ne connait pas le concept de multiprocess et se contente d'exécuter des instruction de façon séquentielle, comment il fait pour ne pas rester coincé dans un programme ? Comment plusieurs programmes peuvent s’exécuter en même temps ?
+2. Si les programmes s'exécutent directement sur le CPU, et si le CPU peut directement accéder à la RAM, pourquoi du code ne peut pas accéder à la zone mémoire d’un autre programme, ou dieu nous en garde, au kernel?
+3. Et au fait, c'est quoi le mécanisme qui empêche les process d'exécuter n’importe-quoi et de faire ce qu’ils veulent à votre ordinateur? ET C'EST QUOI UN PUTAIN DE SYSCALL?
 
 La question sur la mémoire mérite sa propre section, et est traitée dans le [chapitre 5](/the-translator-in-your-computer) — en gros, la plupart des accès mémoire passent par une couche de redirection qui réaffecte la totalité de l'espace d'adressage. Pour l'instant, on va faire semblant de croire que les programmes ont accès à toute la RAM, et que les ordinateurs ne peuvent exécuter qu'un programme à la fois. On reviendra sur ces deux suppositions en temps venu.
 
-C'est l'heure de sauter dans notre premier puits sans fond pour arriver dans un mode plein de syscalls et de couches de sécurité.
+C'est l'heure de sauter dans notre premier puits sans fond pour arriver dans un mode plein de syscalls et d'anneaux de protection.
 
 > **Note : au fait, c'est quoi un kernel ?**
 > 
-> Your computer's operating system, like macOS, Windows, or Linux, is the collection of software that runs on your computer and makes all the basic stuff work. "Basic stuff" is a really general term, and so is "operating system" — depending on who you ask, it can include such things as the apps, fonts, and icons that come with your computer by default.
-> 
-> The kernel, however, is the core of the operating system. When you boot up your computer, the instruction pointer starts at a program somewhere. That program is the kernel. The kernel has near-full access to your computer's memory, peripherals, and other resources, and is in charge of running software installed on your computer (known as userland programs). We'll learn about how the kernel has this access — and how userland programs don't — over the course of this article.
+> Le système d'exploitation de votre ordinateur, comme macOS, Windows ou Linux, est la totalité des programmes qui tournent sur votre ordinateur et font marcher les trucs de base. "Les trucs de base" est un terme très générique, au même titre que "système d'exploitation" — selon à qui vous posez la question, ça peut inclure des choses comme les applis, les polices et les icônes qui viennent par défaut avec votre ordinateur.
 >
-> Linux is just a kernel and needs plenty of userland software like shells and display servers to be usable. The kernel in macOS is called [XNU](https://en.wikipedia.org/wiki/XNU) and is Unix-like, and the modern Windows kernel is called the [NT Kernel](https://en.wikipedia.org/wiki/Architecture_of_Windows_NT).
+> Le kernel en revanche est le cœur de votre système d'exploitation. Quand vous démarrez votre ordinateur ,le pointeur d'instruction démarre à l'emplacement d'un programme quelque part. Ce programme, c'est le kernel. Il a presque tous les accès à la mémoire, aux périphériques et à d'autres ressources de votre ordinateur, et a pour tâche de faire tourner les autres programmes installés sur votre ordinateur (qu'on appelle les programmes userland). On verra comment le kernel peut avoir ces accès — et comment les programmes userland ne peuvent pas — au long de cet article.
+>
+> Linux est juste un kernel et a besoin de plein de programmes userland comme des shells et des serveurs d'affichage pour être utilisable. Le kernel de macOS s'appelle [XNU](https://fr.wikipedia.org/wiki/XNU) et est un Unix-like. Le kernel moderne de Windows s'appelle le [NT Kernel](https://fr.wikipedia.org/wiki/Architecture_de_la_gamme_d%27OS_Windows_NT).
 
-## Two Rings to Rule Them All
+## Deux Anneaux pour les Gouverner Tous
 
-The *mode* (sometimes called privilege level or ring) a processor is in controls what it's allowed to do. Modern architectures have at least two options: kernel/supervisor mode and user mode. While an architecture might support more than two modes, only kernel mode and user mode are commonly used these days.
+Le *mode* (parfois appelé niveau de privilège ou anneau de protection) dans lequel se trouve un processeur définit ce qu'il a le droit de faire. Les architectures modernes disposend d'au moins deux options: le mode kernel ou supervisor (kernel mode en anglais) et le mode utilisateur (user mode en anglais). Bien qu'une architecture puisse disposer de plus de deux modes, seuls les modes kernel et user sont couramment utilisés de nos jours.
 
-In kernel mode, anything goes: the CPU is allowed to execute any supported instruction and access any memory. In user mode, only a subset of instructions is allowed, I/O and memory access is limited, and many CPU settings are locked. Generally, the kernel and drivers run in kernel mode while applications run in user mode.
+En mode kernel, c'est la fête à la saucisse : le CPU est autorisé à exécuter n'importe-quelle instruction supportée et accéder à n'importe-quelle partie de la mémoire. En mode utilisateur, seul un groupe d'instructions est autorisé, l'accès aux entrées/sorties et à la mémoire est limité, et beaucoup de paramètres du processeur sont verrouillés. Généralement, le kernel et les drivers tournent en mode kernel, alors que les applis sont en mode utilisateur.
 
-Processors start in kernel mode. Before executing a program, the kernel initiates the switch to user mode.
+Le processeur démarre en mode kernel. Avant d’exécuter un programme, le kernel déclenche le basculement en mode utilisateur.
 
-<img src='/images/kernel-mode-vs-user-mode.png' loading='lazy' style='max-width: 500px; margin: 0 auto;' alt='Two fake iMessage screenshots demonstrating the different between user and kernel mode protections. The first, labeled Kernel Mode: right side says "Read this protected memory!", left side replies "Here you go, dear :)". The second, labeled User Mode: right side says "Read this protected memory!", left side replies "No! Segmentation fault!"' width='1072' height='433' />
+<img src='/images/kernel-mode-vs-user-mode.png' loading='lazy' style='max-width: 500px; margin: 0 auto;' alt='Deux faux screenshots iMessage montrent les différences entre les protections user mode et kernel mode. Le premier, légendé Kernel Mode : la bulle de droite dit "Lis cette zone mémoire protégée !", la bulle gauche répond "Ok mon lapin :)". Le deuxième, légendé User Mode : la bulle de droite dit "Lis cette zone mémoire protégée !", la bulle de gauche répond :"Non ! Erreur de segmentation !' width='1072' height='433' />
 
-An example of how processor modes manifest in a real architecture: on x86-64, the current privilege level (CPL) can be read from a register called `cs` (code segment). Specifically, the CPL is contained in the two [least significant bits](https://en.wikipedia.org/wiki/Bit_numbering) of the `cs` register. Those two bits can store x86-64's four possible rings: ring 0 is kernel mode and ring 3 is user mode. Rings 1 and 2 are designed for running drivers but are only used by a handful of older niche operating systems. If the CPL bits are `11`, for example, the CPU is running in ring 3: user mode.
+Un exemple de comment les modes du processeur se manifestent dans une vraie architecture : sur x86-64, le niveau de privilège courrant (CPL, current privilege level en anglais) peut être lu dans un registre nommé `cs` (code segment). De manière plus spécifique, le CPL est contenu dans les deux bits de [poids faible](https://fr.wikipedia.org/wiki/Num%C3%A9rotation_des_bits) di registre `cs`. Ces deux bits peuvent stocker l'un des quatre anneaux de sécurité possible de x86-64 : l'anneau 0 est le mode kernel, et le 3 est le mode utilisateur. Les anneaux 1 et 2 sont utilisés pour exécuter des drivers, mais ne sont plus utilisés que par quelques vieux systèmes d'exploitations très spécifiques. Si les bits du CPL sont à `11` par exemple, le CPU utilise l'anneau 3 : mode utilisateur.
  
-## What Even is a Syscall?
+## C'est quoi un syscall ?
 
-Programs run in user mode because they can't be trusted with full access to the computer. User mode does its job, preventing access to most of the computer — but programs need to be able to access I/O, allocate memory, and interact with the operating system *somehow*! To do so, software running in user mode has to ask the operating system kernel for help. The OS can then implement its own security protections to prevent programs from doing anything malicious.
+Les programmes tournent en mode utilisateur parce qu'on ne peut pas leur faire assez confiance pour leur donner un accès complet à l'ordinateur. Le mode utilisateur fait son taff en leur empêchant l'accès à la majeure partie de l'ordinateur — mais les programmes ont besoin de pouvoir accéder aux entrées/sorties, allouer de la mémoire et interagir avec le système d'exploitation *d'une manière ou d'une autre* ! Pour ce faire, les logiciens qui tournent en mode utilisateur doivent demander de l'aide au kernel. L'OS peut alors implémenter ses propres mécanismes de protection pour empêcher les programmes de faire quoi que ce soit de malveillant.
 
-If you've ever written code that interacts with the OS, you'll probably recognize functions like `open`, `read`, `fork`, and `exit`. Below a couple of layers of abstraction, these functions all use *system calls* to ask the OS for help. A system call is a special procedure that lets a program start a transition from user space to kernel space, jumping from the program's code into OS code.
+Si vous avez déjà écrit du code qui interagit avec l'OS, vous allez certainement reconnaitre des fonctions comme `open`, `read`, `fork` et `exit`. Après un certain nombre de couches d'abstractions, ces fonctions utilisent tous des *appels système* (system calls en anglais, ou syscalls) pour demander de l'aide à l'OS. Un appel système est une procédure spéciale qui permet à un programme de passer de l'espace utilisateur à l'espace kernel, en sautant du code du programme au code de l'OS.
 
-User space to kernel space control transfers are accomplished using a processor feature called [*software interrupts*](https://en.wikipedia.org/wiki/Interrupt#Software_interrupts):
+Le passage de l'espace kernel à l'espace utilisateur sont effectués grâce à une fonctionnalité du processeur appelée [interruptions](https://fr.wikipedia.org/wiki/Interruption_(informatique))
 
-1. During the boot process, the operating system stores a table called an [*interrupt vector table*](https://en.wikipedia.org/wiki/Interrupt_vector_table) (IVT; x86-64 calls this the [interrupt descriptor table](https://en.wikipedia.org/wiki/Interrupt_descriptor_table)) in RAM and registers it with the CPU. The IVT maps interrupt numbers to handler code pointers.
+1. Pendant le processus de démarrage, le système d'exploitation stocke un tableau qu'on appelle une [Table de Vecteurs d'interruption](https://en.wikipedia.org/wiki/Interrupt_vector_table)(abbrégé *IVT*, x86-64 appelle ça une [Interrupt descriptor table](https://fr.wikipedia.org/wiki/Interrupt_Descriptor_Table)) en RAM et l'enregistre auprès du CPU. L'IVT établit la correspondance entre des numéros d'interruption et des pointeurs vers des cases mémoire.
 
   <img src='/images/interrupt-vector-table.png' loading='lazy' style='max-width: 300px; margin: 0 auto;' alt='A image of a table captioned "Interrupt Vector Table". The first column, labeled with a number sign, has a series of numbers starting at 01 and going to 04. The corresponding second column of the table, labeled "Handler Address", contains a random 8-byte-long hex number per entry. The bottom of the table has the text "So on and such forth..."' width='555' height='463' />
 
-2. Then, userland programs can use an instruction like [INT](https://www.felixcloutier.com/x86/intn:into:int3:int1) which tells the processor to look up the given interrupt number in the IVT, switch to kernel mode, and then jump the instruction pointer to the memory address stored in the IVT.
+2. Ensuite, les programmes userland peuvent utiliser une instruction comme [INT](https://www.felixcloutier.com/x86/intn:into:int3:int1) qui demande au processeur de chercher le numéro d'interrupt dans l'IVT, basculer en mode kernel, et bouger le pointeur d'instruction à l'adresse mémoire stockée dans l'IVT..
 
-When this kernel code finishes, it uses an instruction like [IRET](https://www.felixcloutier.com/x86/iret:iretd:iretq) to tell the CPU to switch back to user mode and return the instruction pointer to where it was when the interrupt was triggered.
+Quand ce code kernel a été exécuté, il utilise une instruction comme [IRET](https://www.felixcloutier.com/x86/iret:iretd:iretq) pour demander au CPU de re-basculer en mode utilisateur et de re-déplacer le pointeur d'instruction où il était avant le début de l'interruption.
 
-(If you were curious, the interrupt ID used for system calls on Linux is `0x80`. You can read a list of Linux system calls on [Michael Kerrisk's online manpage directory](https://man7.org/linux/man-pages/man2/syscalls.2.html).)
+(Si vous êtes curieux, l'identificateur d'interruption pour les appels système sur Linux est `0x80`. Vous pouvez lire une liste des appels système Linux sur le site de [Michael Kerrisk](https://man7.org/linux/man-pages/man2/syscalls.2.html).)
 
-### Wrapper APIs: Abstracting Away Interrupts
+### APIs wrappers : abstraire les interruptions
 
-Here's what we know so far about system calls:
+Voilà ce que l'on  sait pour l'instant des appels système :
 
-- User mode programs can't access I/O or memory directly. They have to ask the OS for help interacting with the outside world.
-- Programs can delegate control to the OS with special machine code instructions like INT and IRET.
-- Programs can't directly switch privilege levels; software interrupts are safe because the processor has been preconfigured *by the OS* with where in the OS code to jump to. The interrupt vector table can only be configured from kernel mode.
+- Les programmes en mode utilisateur ne peuvent pas accéder aux entrées/sorties ou à la mémoire directement. Ils doivent d'abord demander de l'aide au système d'exploitation afin d'interagir avec le mode extérieur.
+- Les programmes peuvent déléguer du contrôle au système d'exploitation avec des instructions machine spéciales comme INT et IRET.
+- Les programmes ne peuvent pas directement changer de niveau de privilège; les interruptions logicielles sont sures parce que le processeur a été préconfiguré *par le système d'exploitation* pour savoir où sauter dans le code de l'OS. L'IVT ne peut être configurée qu'en mode kernel.
 
-Programs need to pass data to the operating system when triggering a syscall; the OS needs to know which specific system call to execute alongside any data the syscall itself needs, for example, what filename to open. The mechanism for passing this data varies by operating system and architecture, but it's usually done by placing data in certain registers or on the stack before triggering the interrupt.
+Les programmes doivent passer des données au système d'exploitation quand ils déclenchent un appel système; l'OS doit savoir exactement quel appel système exécuter et de quelles données cet appel a besoin, par exemple, le nom du fichier à ouvrir. Les mécanismes pour faire passer ces données varient d'un système d'exploitation et d'une architecture à l'autre, mais il s'agit généralement de placer des données dans certains registres ou sur la pile avant de déclencher une interruption.
 
-The variance in how system calls are called across devices means it would be wildly impractical for programmers to implement system calls themselves for every program. This would also mean operating systems couldn't change their interrupt handling for fear of breaking every program that was written to use the old system. Finally, we typically don't write programs in raw assembly anymore — programmers can't be expected to drop down to assembly any time they want to read a file or allocate memory.
+Les différentes façons d'effectuer des appels système sur les différents appareils rendrait très difficile pour les développeurs d'implémenter eux-même des appels systèmes pour chaque programme. Ça voudrait aussi dire qu'un système d'exploitation ne pourrait pas changer sa gestion des interruptions de peur de casser tout les programmes ayant été écrits pour une version plus vieille de l'OS. Enfin, on n'écrit généralement plus de programmes en assembleur de nos jours - les programmeurs ne peuvent pas être tenus de taper de l'assembleur dès qu'ils veulent lire un fichier ou allouer de la mémoire.
 
 <img src='/images/syscall-architecture-differences.png' loading='lazy' style='max-width: 650px; margin: 0 auto;' alt='A drawing captioned "System calls are implemented differently across architectures." On the left is a smiling CPU receiving some binary and spitting out a filename, file.txt. Separated on the right is a different CPU receiving the same binary data but with a confused and nauseous facial expression.' width='1057' height='360' />
 
-So, operating systems provide an abstraction layer on top of these interrupts. Reusable higher-level library functions that wrap the necessary assembly instructions are provided by [libc](https://www.gnu.org/software/libc/) on Unix-like systems and part of a library called [ntdll.dll](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/libraries-and-headers) on Windows. Calls to these library functions themselves don't cause switches to kernel mode, they're just standard function calls. Inside the libraries, assembly code does actually transfer control to the kernel, and is a lot more platform-dependent than the wrapping library subroutine.
+Les systèmes d'exploitation doivent fournir une couche d'abstraction au dessus de ces interruptions. Des fonctions haut-niveau réutilisables qui enveloppement les instructions en assembleur sont fournies par [libc](https://www.gnu.org/software/libc/) sur les systèmes Unix et font partie d'un librairie nommée [ntdll.dll](https://learn.microsoft.com/fr-fr/windows-hardware/drivers/kernel/libraries-and-headers) sur Windows. Les appels aux fonctions de ces librairies ne déclenchent pas de bascule en mode kernel, il s'agit juste de fonctions standard. Dans ces librairies, du code assembleur passe le contrôle au kernel, et est beaucoup plus spécifique à une plateforme que le code de la librairie qui l'enveloppe.
 
-When you call `exit(1)` from C running on a Unix-like system, that function is internally running machine code to trigger an interrupt, after placing the system call's opcode and arguments in the right registers/stack/whatever. Computers are so cool!
+Quand vous appelez `exit(1)` en C sur un système Unix, cette fonction va en interne exécuter du code qui déclenche une interruption, après avoir placé l'opcode de l'appel système et les arguments dans le bon registre/pile/etc. Les ordinateurs sont tellement cools !
 
-## The Need for Speed / Let's Get CISC-y
+## Need for Speed / CISC
 
-Many [CISC](https://en.wikipedia.org/wiki/Complex_instruction_set_computer) architectures like x86-64 contain instructions designed for system calls, created due to the prevalence of the system call paradigm.
+Plein d'architectures [CISC](https://fr.wikipedia.org/wiki/Microprocesseur_%C3%A0_jeu_d%27instruction_%C3%A9tendu) comme x86-64 contiennent des instructions destinées aux appels systèmes à cause de la prévalence du paradigme des appels système.
 
-Intel and AMD managed not to coordinate very well on x86-64; it actually has *two* sets of optimized system call instructions. [SYSCALL](https://www.felixcloutier.com/x86/syscall.html) and [SYSENTER](https://www.felixcloutier.com/x86/sysenter) are optimized alternatives to instructions like `INT 0x80`. Their corresponding return instructions, [SYSRET](https://www.felixcloutier.com/x86/sysret.html) and [SYSEXIT](https://www.felixcloutier.com/x86/sysexit), are designed to transition quickly back to user space and resume program code.
+Intel et AMD se sont débrouillés pour ne pas bien s'accorder sur le x86-64; it contient en fait deux groupes d'instructions d'appels système. [SYSCALL](https://www.felixcloutier.com/x86/syscall.html) et [SYSENTER](https://www.felixcloutier.com/x86/sysenter) sont des alternatives optimisées à des instructions comme `INT 0x80`. Their corresponding return instructions, [SYSRET](https://www.felixcloutier.com/x86/sysret.html) and [SYSEXIT](https://www.felixcloutier.com/x86/sysexit), are designed to transition quickly back to user space and resume program code.
 
 (AMD and Intel processors have slightly different compatibility with these instructions. `SYSCALL` is generally the best option for 64-bit programs, while `SYSENTER` has better support with 32-bit programs.)
 
