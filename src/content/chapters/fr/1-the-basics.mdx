@@ -122,22 +122,22 @@ Quand vous appelez `exit(1)` en C sur un système Unix, cette fonction va en int
 
 Plein d'architectures [CISC](https://fr.wikipedia.org/wiki/Microprocesseur_%C3%A0_jeu_d%27instruction_%C3%A9tendu) comme x86-64 contiennent des instructions destinées aux appels systèmes à cause de la prévalence du paradigme des appels système.
 
-Intel et AMD se sont débrouillés pour ne pas bien s'accorder sur le x86-64; it contient en fait deux groupes d'instructions d'appels système. [SYSCALL](https://www.felixcloutier.com/x86/syscall.html) et [SYSENTER](https://www.felixcloutier.com/x86/sysenter) sont des alternatives optimisées à des instructions comme `INT 0x80`. Their corresponding return instructions, [SYSRET](https://www.felixcloutier.com/x86/sysret.html) and [SYSEXIT](https://www.felixcloutier.com/x86/sysexit), are designed to transition quickly back to user space and resume program code.
+Intel et AMD se sont débrouillés pour ne pas bien s'accorder sur le x86-64; il contient en fait deux groupes d'instructions d'appels système. [SYSCALL](https://www.felixcloutier.com/x86/syscall.html) et [SYSENTER](https://www.felixcloutier.com/x86/sysenter) sont des alternatives optimisées à des instructions comme `INT 0x80`. Leurs instructions de retour respectives, [SYSRET](https://www.felixcloutier.com/x86/sysret.html) et [SYSEXIT](https://www.felixcloutier.com/x86/sysexit), permettent de revenir rapidement en user space et de revenir au code du programme.
 
-(AMD and Intel processors have slightly different compatibility with these instructions. `SYSCALL` is generally the best option for 64-bit programs, while `SYSENTER` has better support with 32-bit programs.)
+(Les processeurs AMD et Intel ont des compatibilités légèrement variante avec ces instructions. `SYSCALL` est souvent la meilleure option pour des programmes 64 bits, alors que `SYSENTER` est mieux supporté dans les programmes 32 bits)
 
-Representative of the style, [RISC](https://en.wikipedia.org/wiki/Reduced_instruction_set_computer) architectures tend not to have such special instructions. AArch64, the RISC architecture Apple Silicon is based on, uses only [one interrupt instruction](https://developer.arm.com/documentation/ddi0596/2021-12/Base-Instructions/SVC--Supervisor-Call-) for syscalls and software interrupts alike. I think Mac users are doing fine&nbsp;:)
+Dans leur propre style, les architectures RISC(https://fr.wikipedia.org/wiki/Processeur_à_jeu_d'instructions_réduit) n'ont pas ce genre d'instructions. AArch64, l'architecture RISC sur laquelle est basée Apple Silican, n'utilise [qu'une seule instruction d'interruption](https://developer.arm.com/documentation/ddi0596/2021-12/Base-Instructions/SVC--Supervisor-Call-) pour les appels système et les interruptions. Je pense que les utilisateurs Mac le vivent bien :)
 
 ---
 
-Whew, that was a lot! Let's do a brief recap:
+Wow, ça fait un gros morceau! Faisons un petit récap :
 
-- Processors execute instructions in an infinite fetch-execute loop and don't have any concept of operating systems or programs. The processor's mode, usually stored in a register, determines what instructions may be executed. Operating system code runs in kernel mode and switches to user mode to run programs.
-- To run a binary, the operating system switches to user mode and points the processor to the code's entry point in RAM. Because they only have the privileges of user mode, programs that want to interact with the world need to jump to OS code for help. System calls are a standardized way for programs to switch from user mode to kernel mode and into OS code.
-- Programs typically use these syscalls by calling shared library functions. These wrap machine code for either software interrupts or architecture-specific syscall instructions that transfer control to the OS kernel and switch rings. The kernel does its business and switches back to user mode and returns to the program code.
+- Les processeurs exécutent des instructions dans une boucle infinie de cycles d'éxecutions (fetc-execute loop), et n'ont aucune idée de ce qu'est un système d'exploitation ou un programme. Le mode du processeur, généralement stocké dans un registre, determine quelles instructions peuvent être exécutées. Le code du système d'exploitation s'exécute en mode kernel et bascule en mode utilisateur pour exécuter des programmes.
+- Pour exécuter une application, le système d'exploitation bascule en mode utilisateur et pointe le processeur vers le point d'entrée du code dans la RAM. Parce qu'ils n'ont que les droits offerts par le mode utilisateur, les programmes qui veulent intéragir avec l'extérieur doivent demander de l'aide à du code du système d'exploitation. Les appels système constituent une façon standard pour les programmes de basculer du mode utilisateur vers le mode kernel et donc vers du code de l'OS
+- Les programmes utilisent ces appels système via des fonctions de librairies partagées. Elles enveloppent du code machine pour soit une interruption logicielle ou un appel système spécifique à une architecture qui délègue le contrôle au kernel de l'OS et change le niveau de sécurité. Le kernel fait son taff et bascule en mode utilisateur, retournant au code du programme.
 
-Let’s figure out how to answer my first question from earlier:
+Essayons de répondre à ma première question :
 
-> If the CPU doesn't keep track of more than one process and just executes instruction after instruction, why doesn't it get stuck inside whatever program it's running? How can multiple programs run at once?
+> Si le CPU n'est pas capable de suivre plusieurs processus et se contente d'exécuter des instructions les unes après les autres, pourquoi il ne reste pas bloqué dans un programme ? Comment fait-il pour faire tourner plusieurs programmes à a fois  ?
 
-The answer to this, my dear friend, is also the answer to why Coldplay is so popular... clocks! (Well, technically timers. I just wanted to shoehorn that joke in.)
+La réponse à cette question, cher ami, est aussi la réponse à pourquoi Coldplay est si populaire... Clocks, les horloges! (En vrai on appelle ça des timers. Je voulais juste glisser cette vanne).
