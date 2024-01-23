@@ -29,8 +29,6 @@ On appelle ça du *multi-tâche préemptif*, et le fait d'interrompre un process
 
 ## Calcul de l’intervalle de temps
 
-A *timeslice* is the duration an OS scheduler allows a process to run before preempting it. The simplest way to pick timeslices is to give every process the same timeslice, perhaps in the 10&nbsp;ms range, and cycle through tasks in order. This is called *fixed timeslice round-robin* scheduling.
-
 Un *intervalle de temps* est la durée que l'OS autorise à un processus pour s'exécuter avant de le préempter. La façon la plus simple de définir cet intervalle est de donner à chaque processus la même durée, par exemple autour des 10ms, et de faire défiler les tâches dans l'ordre. On appelle ça *l'ordonnancement round-robin à intervalles de temps fixes*.
 
 > **Note: fun facts jargon!**
@@ -45,24 +43,24 @@ On calcule les intervalles de temps en divisant la latence cible par le nombre t
 
 Le fait de changer de process est coûteux en performance parce qu'il nécessite de sauvegarder l'état entier d'un programme et d'en restaurer un autre. Après un certain point, un intervalle de temps trop petit peut causer des problèmes de performance à cause de problèmes changeant trop rapidement. Il est commun de donner à l'intervalle de temps une durée plancher (*granularité minimum*). Ca signifie que la latence cible est dépassée lorsque suffisamment de processus sont présents pour que la granularité minimale puisse prendre effet.
 
-Ai moment où j'écris cet article, le scheduler de Linux utilise une latence cible de 6ms et une granularité minimum de 0.75ms.
+Au moment où j'écris cet article, le scheduler de Linux utilise une latence cible de 6ms et une granularité minimum de 0.75ms.
 
 <img src='/images/linux-scheduler-target-latency.png' loading='lazy' style='max-width: 500px; margin: 0 auto;' alt='A diagram titled "Naive Dynamic Timeslice Round-Robin Scheduling." It depicts a time series of 3 different processes getting time to execute in a repeated cycle. In between the execution blocks of each process is a much shorter block labeled "kernel scheduler." The length of each program execution block is labeled "timeslice (2ms)." The distance from the start of process 1 executing to the next start of process 1 executing, encompassing the execution time of processes 2 and 3, is labeled as "target latency (6ms)."' width='935' height='433' />
 
-Round-robin scheduling with this basic timeslice calculation is close to what most computers do nowadays. It's still a bit naive; most operating systems tend to have more complex schedulers which take process priorities and deadlines into account. Since 2007, Linux has used a scheduler called [Completely Fair Scheduler](https://docs.kernel.org/scheduler/sched-design-CFS.html). CFS does a bunch of very fancy computer science things to prioritize tasks and divvy up CPU time.
+L'ordonnancement round-robin utilisant cette façon de calculer les intervalles de temps est proche de ce que la plupart des ordinateurs font de nos jours. C'est toujours un peu naïf, la plupart des OS ont des schedulers plus complexes qui prennent en compte les priorités de processus et les deadlines. Depuis 2007, Linux utilise un scheduler qui s'appelle [Completely Fair Scheduler](https://docs.kernel.org/scheduler/sched-design-CFS.html). CFS fait tout un tas de trucs de science des ordinateurs pour prioriser les tâches et diviser le temps du CPU.
 
-Every time the OS preempts a process it needs to load the new program's saved execution context, including its memory environment. This is accomplished by telling the CPU to use a different *page table*, the mapping from "virtual" to physical addresses. This is also the system that prevents programs from accessing each other's memory; we'll go down this rabbit hole in chapters [5](/the-translator-in-your-computer) and [6](/lets-talk-about-forks-and-cows) of this article.
+A chaque fois que l'OS préempte un processus, il doit charger le contexte d'exécution du nouveau programme qu'il avait sauvegardé, comprenant son environnement en mémoire. On fait ça en disant au CPU d'utiliser une autre *page table*, c'est à dire la correspondance entre les adresses physiques et virtuelles. C'est aussi le système qui empêche les programmes d'accéder à la mémoire d'autres programmes; on sautera dans ce trou de lapin aux chapitres [5](/the-translator-in-your-computer) et [6](/lets-talk-about-forks-and-cows) de cet artile.
 
-## Note #1: Kernel Preemptability
+## Note #1: Preemptabilité du kernel
 
-So far, we've been only talking about the preemption and scheduling of userland processes. Kernel code might make programs feel laggy if it took too long handling a syscall or executing driver code.
+Jusqu'ici, on a seulement parlé de la préemption et du scheduling des processus userland. Le kernel pourrait donner l'impression que les programmes laggent s'il prend trop longtemps à gérer un appel système ou exécuter le code d'un driver.
 
-Modern kernels, including Linux, are [preemptive kernels](https://en.wikipedia.org/wiki/Kernel_preemption). This means they're programmed in a way that allows kernel code itself to be interrupted and scheduled just like userland processes.
+Les kernels modernes, Linux y-compris, sont des [kernels préemptifs](https://en.wikipedia.org/wiki/Kernel_preemption). Ca veut dire qu'ils sont fait de façon à ce que le code du kernel lui-même puisse être interrompu et schedulé comme des processus userland.
 
-This isn't very important to know about unless you're writing a kernel or something, but basically every article I've read has mentioned it so I thought I would too! Extra knowledge is rarely a bad thing.
+C'est pas très important à savoir à moins que vous écriviez un kernel, mais en gros chaque article que j'ai lu l'a mentionné, donc je me suis dit que j'allais le faire aussi ! Des connaissances en plus font rarement du mal.
 
-## Note #2: A History Lesson
+## Note #2: Une leçon d'histoire
 
-Ancient operating systems, including classic Mac OS and versions of Windows long before NT, used a predecessor to preemptive multitasking. Rather than the OS deciding when to preempt programs, the programs themselves would choose to yield to the OS. They would trigger a software interrupt to say, "hey, you can let another program run now." These explicit yields were the only way for the OS to regain control and switch to the next scheduled process.
+Les vieux systèmes d'exploitation, ce qui inclue le Mac OS classique et les versions de Windows bien avant NT, utilisaient un prédécesseur sur multi-tâche préemptif. Plutôt que ce soit l'OS qui décidé de quand préempter un programme, les programmes eux-mêmes décidaient de laisser la main à l'OS. Ils déclenchaient une interruption logicielle pour dire "hey, tu peux laisser un autre programme tourner maintenant". Ces demandes explicitent étaient la seule façon pour l'OS de reprendre le contrôle et de passer au prochain processus sur la liste.
 
-This is called [*cooperative multitasking*](https://en.wikipedia.org/wiki/Cooperative_multitasking). It has a couple major flaws: malicious or just poorly designed programs can easily freeze the entire operating system, and it's nigh impossible to ensure temporal consistency for realtime/time-sensitive tasks. For these reasons, the tech world switched to preemptive multitasking a long time ago and never looked back.
+On appelle ça le [*multitâche coopératif*](https://en.wikipedia.org/wiki/Cooperative_multitasking). Il possède un certain nombre de défauts : des programmes malicieux ou juste mal pensés pouvaient facilement freezer l'OS tout entier, et il est presque impossible d'assurer une consistance temporelle pour des tâches temps-réel et/ou sensibles. Pour ces raisons, le monde de la tech a basculé sur du multitâche préemptif il y a longtemps et n'a jamais changé.
